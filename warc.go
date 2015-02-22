@@ -15,13 +15,35 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 )
 
+type byteCounter struct {
+	r      *bufio.Reader
+	offset int64
+}
+
+func (bc *byteCounter) Read(p []byte) (n int, err error) {
+	n, err = bc.r.Read(p)
+	bc.offset += int64(n)
+	return
+}
+
+func (bc *byteCounter) ReadByte() (c byte, err error) {
+	c, err = bc.r.ReadByte()
+	if err == nil {
+		bc.offset++
+	}
+
+	return
+}
+
 type Reader struct {
-	f  *os.File
-	b  *bufio.Reader
-	zr *gzip.Reader
+	f    *os.File
+	bc   *byteCounter
+	zr   *gzip.Reader
+	last int64
 }
 
 func Open(archive string) (*Reader, error) {
@@ -31,10 +53,10 @@ func Open(archive string) (*Reader, error) {
 	}
 
 	r := &Reader{f: f,
-		b: bufio.NewReader(f),
+		bc: &byteCounter{r: bufio.NewReader(f)},
 	}
 
-	r.zr, err = gzip.NewReader(r.b)
+	r.zr, err = gzip.NewReader(r.bc)
 	if err != nil {
 		return nil, err
 	}
@@ -53,16 +75,21 @@ func (r *Reader) Close() error {
 
 type record []byte
 
-func (r *Reader) record() (rec record, err error) {
-	data := make([]byte, 1024)
-	_, err = r.zr.Read(data)
-	if err == io.EOF {
-		r.zr.Reset(r.b)
-		r.zr.Multistream(false)
-		_, err = r.zr.Read(data)
+func (r *Reader) record() (record, error) {
+	b, err := ioutil.ReadAll(r.zr)
+	if err != nil {
+		return nil, err
 	}
-	rec = record(data)
-	return
+
+	if r.last == r.bc.offset {
+		return nil, io.EOF
+	}
+
+	r.last = r.bc.offset
+	r.zr.Reset(r.bc)
+	r.zr.Multistream(false)
+
+	return record(b), nil
 }
 
 func main() {
