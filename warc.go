@@ -13,10 +13,12 @@ package main
 import (
 	"bufio"
 	"compress/gzip"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
+	"strings"
 )
 
 type byteCounter struct {
@@ -46,16 +48,16 @@ type Reader struct {
 	last int64
 }
 
-func Open(archive string) (*Reader, error) {
-	f, err := os.Open(archive)
-	if err != nil {
-		return nil, err
+func NewReader(reader io.Reader) *Reader {
+	return &Reader{
+		bc: &byteCounter{
+			r: bufio.NewReader(reader),
+		},
 	}
+}
 
-	r := &Reader{f: f,
-		bc: &byteCounter{r: bufio.NewReader(f)},
-	}
-
+func NewGZIPReader(reader io.Reader) (r *Reader, err error) {
+	r = NewReader(reader)
 	r.zr, err = gzip.NewReader(r.bc)
 	if err != nil {
 		return nil, err
@@ -65,17 +67,9 @@ func Open(archive string) (*Reader, error) {
 	return r, nil
 }
 
-func (r *Reader) Close() error {
-	if r != nil && r.f != nil {
-		return r.f.Close()
-	}
-
-	return nil
-}
-
 type record []byte
 
-func (r *Reader) record() (record, error) {
+func (r *Reader) gzipRecord() (record, error) {
 	b, err := ioutil.ReadAll(r.zr)
 	if err != nil {
 		return nil, err
@@ -92,22 +86,51 @@ func (r *Reader) record() (record, error) {
 	return record(b), nil
 }
 
+func (r *Reader) plainRecord() (record, error) {
+	// TODO: Implement
+	return nil, errors.New("NYI")
+}
+
+func (r *Reader) record() (rec record, err error) {
+	if r.zr != nil {
+		rec, err = r.gzipRecord()
+	} else {
+		rec, err = r.plainRecord()
+	}
+
+	return
+}
+
 func main() {
 	if len(os.Args) != 2 {
 		fmt.Println("specify path to WARC file")
 		os.Exit(1)
 	}
 
-	x, err := Open(os.Args[1])
+	f, err := os.Open(os.Args[1])
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
 
-	defer x.Close()
+	defer f.Close()
+
+	var x *Reader
+	if strings.HasSuffix(os.Args[1], ".warc.gz") {
+		x, err = NewGZIPReader(f)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}
+	} else {
+		x = NewReader(f)
+	}
+
 	for {
 		rec, err := x.record()
-		if err != nil {
+		if err == io.EOF {
+			break
+		} else if err != nil {
 			fmt.Println("record error: ", err)
 			break
 		}
