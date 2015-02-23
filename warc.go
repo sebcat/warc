@@ -1,6 +1,8 @@
 // Sequential WARC file reader library supporting record-at-time compression
 // this requires go1.4 due to its usage of compress/gzip.Reader#Multistream
 //
+// Currently only works on record-at-time compressed .gz files
+//
 // Example:
 //
 //     code
@@ -8,18 +10,18 @@
 //
 // see also:
 //     URL to implementation repo
-package main
+package warc
 
 import (
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
-	"os"
-	"strings"
 )
+
+var ErrMalformedRecord = errors.New("malformed record")
 
 type byteCounter struct {
 	r      *bufio.Reader
@@ -42,10 +44,19 @@ func (bc *byteCounter) ReadByte() (c byte, err error) {
 }
 
 type Reader struct {
-	f    *os.File
 	bc   *byteCounter
 	zr   *gzip.Reader
 	last int64
+}
+
+type NamedField struct {
+	Name  string
+	Value string
+}
+
+type Record struct {
+	Fields []NamedField
+	Block  []byte
 }
 
 func NewReader(reader io.Reader) *Reader {
@@ -67,10 +78,9 @@ func NewGZIPReader(reader io.Reader) (r *Reader, err error) {
 	return r, nil
 }
 
-type record []byte
-
-func (r *Reader) gzipRecord() (record, error) {
-	b, err := ioutil.ReadAll(r.zr)
+func (r *Reader) gzipRecord() ([]byte, error) {
+	var rec bytes.Buffer
+	_, err := io.Copy(&rec, r.zr)
 	if err != nil {
 		return nil, err
 	}
@@ -82,59 +92,36 @@ func (r *Reader) gzipRecord() (record, error) {
 	r.last = r.bc.offset
 	r.zr.Reset(r.bc)
 	r.zr.Multistream(false)
-
-	return record(b), nil
+	return rec.Bytes(), nil
 }
 
-func (r *Reader) plainRecord() (record, error) {
+func (r *Reader) plainRecord() ([]byte, error) {
 	// TODO: Implement
-	return nil, errors.New("NYI")
+	return nil, errors.New("support for non record-at-time compressed WARC files not yet implemented")
 }
 
-func (r *Reader) record() (rec record, err error) {
+func (r *Reader) record() ([]byte, error) {
 	if r.zr != nil {
-		rec, err = r.gzipRecord()
+		return r.gzipRecord()
 	} else {
-		rec, err = r.plainRecord()
+		return r.plainRecord()
 	}
-
-	return
 }
 
-func main() {
-	if len(os.Args) != 2 {
-		fmt.Println("specify path to WARC file")
-		os.Exit(1)
-	}
+// returns io.EOF when done
+func (r *Reader) Next() (*Record, error) {
 
-	f, err := os.Open(os.Args[1])
+	rec, err := r.record()
 	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
+		return nil, err
 	}
 
-	defer f.Close()
-
-	var x *Reader
-	if strings.HasSuffix(os.Args[1], ".warc.gz") {
-		x, err = NewGZIPReader(f)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}
-	} else {
-		x = NewReader(f)
+	parts := bytes.SplitN(rec, []byte("\r\n\r\n"), 2)
+	if len(parts) != 2 {
+		return nil, ErrMalformedRecord
 	}
 
-	for {
-		rec, err := x.record()
-		if err == io.EOF {
-			break
-		} else if err != nil {
-			fmt.Println("record error: ", err)
-			break
-		}
+	fmt.Printf("\"%v\" \"%v\"", string(parts[0]), string(parts[1]))
 
-		fmt.Println("RECORD\n------\n\n", string(rec))
-	}
+	return nil, errors.New("NYI")
 }
