@@ -17,11 +17,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"errors"
-	"fmt"
 	"io"
+	"strconv"
+	"strings"
 )
 
-var ErrMalformedRecord = errors.New("malformed record")
+var (
+	ErrMalformedRecord = errors.New("malformed record")
+	ErrNonWARCRecord   = errors.New("non-WARC/1.0 record")
+)
 
 type byteCounter struct {
 	r      *bufio.Reader
@@ -54,9 +58,21 @@ type NamedField struct {
 	Value string
 }
 
+type NamedFields []NamedField
+
 type Record struct {
-	Fields []NamedField
+	Fields NamedFields
 	Block  []byte
+}
+
+func (f NamedFields) Value(name string) string {
+	for _, el := range f {
+		if strings.EqualFold(el.Name, name) {
+			return el.Value
+		}
+	}
+
+	return ""
 }
 
 func NewReader(reader io.Reader) *Reader {
@@ -110,6 +126,7 @@ func (r *Reader) record() ([]byte, error) {
 
 // returns io.EOF when done
 func (r *Reader) Next() (*Record, error) {
+	var res Record
 
 	rec, err := r.record()
 	if err != nil {
@@ -121,7 +138,40 @@ func (r *Reader) Next() (*Record, error) {
 		return nil, ErrMalformedRecord
 	}
 
-	fmt.Printf("\"%v\" \"%v\"", string(parts[0]), string(parts[1]))
+	hdr, block := parts[0], parts[1]
+	/*
+		if bytes.HasSuffix(block, []byte("\r\n\r\n")) {
+			block = block[:len(block)-4]
+		} else {
+			return nil, ErrMalformedRecord
+		}
+	*/
+	res.Block = block
 
-	return nil, errors.New("NYI")
+	for ix, hdrline := range bytes.Split(hdr, []byte("\r\n")) {
+		if ix == 0 {
+			if string(hdrline) != "WARC/1.0" {
+				return nil, ErrNonWARCRecord
+			}
+
+			continue
+		}
+
+		l := bytes.SplitN(hdrline, []byte(":"), 2)
+		if len(l) != 2 {
+			return nil, ErrMalformedRecord
+		}
+
+		res.Fields = append(res.Fields, NamedField{
+			Name:  string(bytes.Trim(l[0], "\r\n\t ")),
+			Value: string(bytes.Trim(l[1], "\r\n\t ")),
+		})
+	}
+
+	lenStr := res.Fields.Value("content-length")
+	if i, err := strconv.Atoi(lenStr); err == nil {
+		res.Block = res.Block[:i]
+	}
+
+	return &res, nil
 }
