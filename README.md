@@ -83,3 +83,26 @@ type Record struct {
 	Block  []byte
 }
 ```
+
+
+#### type Writer
+
+```go
+type Writer struct {
+}
+```
+
+
+#### func  NewWriter
+
+```go
+func NewWriter(w io.Writer) *Writer
+```
+
+#### func (*Writer) WriteRecord
+
+```go
+func (w *Writer) WriteRecord(r *Record) error
+```
+Write a record. No validation of mandatory WARC fields is performed. The written
+record will be an independent GZIP stream.
