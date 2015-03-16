@@ -65,6 +65,18 @@ type Record struct {
 	Block  []byte
 }
 
+func (r *Record) bytes() []byte {
+	var b bytes.Buffer
+	b.Write([]byte("WARC/1.0\r\n"))
+	for _, field := range r.Fields {
+		b.Write([]byte(field.Name + ": " + field.Value + "\r\n"))
+	}
+
+	b.Write([]byte("\r\n"))
+	b.Write([]byte(r.Block))
+	return b.Bytes()
+}
+
 func (f NamedFields) Value(name string) string {
 	for _, el := range f {
 		if strings.EqualFold(el.Name, name) {
@@ -139,15 +151,7 @@ func (r *Reader) Next() (*Record, error) {
 	}
 
 	hdr, block := parts[0], parts[1]
-	/*
-		if bytes.HasSuffix(block, []byte("\r\n\r\n")) {
-			block = block[:len(block)-4]
-		} else {
-			return nil, ErrMalformedRecord
-		}
-	*/
 	res.Block = block
-
 	for ix, hdrline := range bytes.Split(hdr, []byte("\r\n")) {
 		if ix == 0 {
 			if string(hdrline) != "WARC/1.0" {
@@ -174,4 +178,26 @@ func (r *Reader) Next() (*Record, error) {
 	}
 
 	return &res, nil
+}
+
+type Writer struct {
+	w  io.Writer
+	zw *gzip.Writer
+}
+
+func NewWriter(w io.Writer) *Writer {
+	return &Writer{w: w, zw: gzip.NewWriter(w)}
+}
+
+// Write a record. No validation of mandatory WARC fields is performed.
+// The written record will be an independent GZIP stream.
+func (w *Writer) WriteRecord(r *Record) error {
+	rec := r.bytes()
+	if _, err := w.zw.Write(rec); err != nil {
+		return err
+	}
+
+	err := w.zw.Close()
+	w.zw.Reset(w.w)
+	return err
 }
