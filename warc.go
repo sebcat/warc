@@ -74,6 +74,7 @@ func (r *Record) bytes() []byte {
 
 	b.Write([]byte("\r\n"))
 	b.Write([]byte(r.Block))
+	b.Write([]byte("\r\n\r\n"))
 	return b.Bytes()
 }
 
