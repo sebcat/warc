@@ -7,7 +7,6 @@
 package warc
 
 import (
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"errors"
@@ -21,29 +20,65 @@ var (
 	ErrNonWARCRecord   = errors.New("non-WARC/1.0 record")
 )
 
-type byteCounter struct {
-	r      *bufio.Reader
-	offset int64
+// a combo of a buffered reader and an offset counter.
+// we're doing this because the alternative approach of
+// wrapping bufio steals a bit of time since the reader
+// will be called in a tight loop when used as an
+// io.ByteReader inside
+// compress/flate.(*decompressor).moreBits (go1.4.2)
+type reader struct {
+	r io.Reader
+
+	rbuf     [4096]byte
+	nbufleft int
+	rpos     int
+
+	// number of bytes having been read from this reader
+	// (i.e., not from r)
+	nread int64
 }
 
-func (bc *byteCounter) Read(p []byte) (n int, err error) {
-	n, err = bc.r.Read(p)
-	bc.offset += int64(n)
+func (r *reader) next() (n int, err error) {
+	n, err = r.r.Read(r.rbuf[:])
+	r.nbufleft = n
+	r.rpos = 0
+	return
+}
+
+func (r *reader) Read(p []byte) (n int, err error) {
+	ncopy := len(p)
+	if r.nbufleft == 0 {
+		ncopy, err = r.next()
+	}
+
+	if ncopy > r.nbufleft {
+		ncopy = r.nbufleft
+	}
+
+	n = copy(p, r.rbuf[r.rpos:r.rpos+r.nbufleft])
+	r.rpos += n
+	r.nread += int64(n)
+	r.nbufleft -= n
 	return
 }
 
 // This is a bit of a bottle neck, as it's called often
-func (bc *byteCounter) ReadByte() (c byte, err error) {
-	c, err = bc.r.ReadByte()
-	if err == nil {
-		bc.offset++
+func (r *reader) ReadByte() (c byte, err error) {
+	if r.nbufleft == 0 {
+		if _, err = r.next(); r.nbufleft == 0 {
+			return 0, err
+		}
 	}
 
+	c = r.rbuf[r.rpos]
+	r.nread++
+	r.rpos++
+	r.nbufleft--
 	return
 }
 
 type Reader struct {
-	bc   *byteCounter
+	r    *reader
 	zr   *gzip.Reader
 	last int64
 }
@@ -119,17 +154,17 @@ func (f NamedFields) Value(name string) string {
 	return ""
 }
 
-func NewReader(reader io.Reader) *Reader {
+func NewReader(r io.Reader) *Reader {
 	return &Reader{
-		bc: &byteCounter{
-			r: bufio.NewReader(reader),
+		r: &reader{
+			r: r,
 		},
 	}
 }
 
 func NewGZIPReader(reader io.Reader) (r *Reader, err error) {
 	r = NewReader(reader)
-	r.zr, err = gzip.NewReader(r.bc)
+	r.zr, err = gzip.NewReader(r.r)
 	if err != nil {
 		return nil, err
 	}
@@ -145,12 +180,12 @@ func (r *Reader) gzipRecord() ([]byte, error) {
 		return nil, err
 	}
 
-	if r.last == r.bc.offset {
+	if r.last == r.r.nread {
 		return nil, io.EOF
 	}
 
-	r.last = r.bc.offset
-	r.zr.Reset(r.bc)
+	r.last = r.r.nread
+	r.zr.Reset(r.r)
 	r.zr.Multistream(false)
 	return rec.Bytes(), nil
 }
