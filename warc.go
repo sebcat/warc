@@ -65,7 +65,7 @@ type Record struct {
 	Block  []byte
 }
 
-func (r *Record) bytes() []byte {
+func (r *Record) Bytes() []byte {
 	var b bytes.Buffer
 	b.Write([]byte("WARC/1.0\r\n"))
 	for _, field := range r.Fields {
@@ -76,6 +76,42 @@ func (r *Record) bytes() []byte {
 	b.Write([]byte(r.Block))
 	b.Write([]byte("\r\n\r\n"))
 	return b.Bytes()
+}
+
+func (r *Record) FromBytes(rec []byte) error {
+	parts := bytes.SplitN(rec, []byte("\r\n\r\n"), 2)
+	if len(parts) != 2 {
+		return ErrMalformedRecord
+	}
+
+	hdr, block := parts[0], parts[1]
+	r.Block = block
+	for ix, hdrline := range bytes.Split(hdr, []byte("\r\n")) {
+		if ix == 0 {
+			if string(hdrline) != "WARC/1.0" {
+				return ErrNonWARCRecord
+			}
+
+			continue
+		}
+
+		l := bytes.SplitN(hdrline, []byte(":"), 2)
+		if len(l) != 2 {
+			return ErrMalformedRecord
+		}
+
+		r.Fields = append(r.Fields, NamedField{
+			Name:  string(bytes.Trim(l[0], "\r\n\t ")),
+			Value: string(bytes.Trim(l[1], "\r\n\t ")),
+		})
+	}
+
+	lenStr := r.Fields.Value("content-length")
+	if i, err := strconv.Atoi(lenStr); err == nil {
+		r.Block = r.Block[:i]
+	}
+
+	return nil
 }
 
 func (f NamedFields) Value(name string) string {
@@ -137,6 +173,15 @@ func (r *Reader) record() ([]byte, error) {
 	}
 }
 
+// Scans a stream for a raw WARC record. Doesn't do any
+// validation or parsing. Useful for concurrency pipelines
+// where the parsing and message handling is fanned out to
+// multiple goroutines. See Record#FromBytes
+func (r *Reader) NextRaw() ([]byte, error) {
+	return r.record()
+}
+
+// Scans and parses a WARC record from a stream.
 // returns io.EOF when done
 func (r *Reader) Next() (*Record, error) {
 	var res Record
@@ -146,36 +191,8 @@ func (r *Reader) Next() (*Record, error) {
 		return nil, err
 	}
 
-	parts := bytes.SplitN(rec, []byte("\r\n\r\n"), 2)
-	if len(parts) != 2 {
-		return nil, ErrMalformedRecord
-	}
-
-	hdr, block := parts[0], parts[1]
-	res.Block = block
-	for ix, hdrline := range bytes.Split(hdr, []byte("\r\n")) {
-		if ix == 0 {
-			if string(hdrline) != "WARC/1.0" {
-				return nil, ErrNonWARCRecord
-			}
-
-			continue
-		}
-
-		l := bytes.SplitN(hdrline, []byte(":"), 2)
-		if len(l) != 2 {
-			return nil, ErrMalformedRecord
-		}
-
-		res.Fields = append(res.Fields, NamedField{
-			Name:  string(bytes.Trim(l[0], "\r\n\t ")),
-			Value: string(bytes.Trim(l[1], "\r\n\t ")),
-		})
-	}
-
-	lenStr := res.Fields.Value("content-length")
-	if i, err := strconv.Atoi(lenStr); err == nil {
-		res.Block = res.Block[:i]
+	if err := res.FromBytes(rec); err != nil {
+		return nil, err
 	}
 
 	return &res, nil
@@ -193,7 +210,7 @@ func NewWriter(w io.Writer) *Writer {
 // Write a record. No validation of mandatory WARC fields is performed.
 // The written record will be an independent GZIP stream.
 func (w *Writer) WriteRecord(r *Record) error {
-	rec := r.bytes()
+	rec := r.Bytes()
 	if _, err := w.zw.Write(rec); err != nil {
 		return err
 	}

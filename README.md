@@ -73,7 +73,16 @@ func NewReader(reader io.Reader) *Reader
 ```go
 func (r *Reader) Next() (*Record, error)
 ```
-returns io.EOF when done
+Scans and parses a WARC record from a stream. returns io.EOF when done
+
+#### func (*Reader) NextRaw
+
+```go
+func (r *Reader) NextRaw() ([]byte, error)
+```
+Scans a stream for a raw WARC record. Doesn't do any validation or parsing.
+Useful for concurrency pipelines where the parsing and message handling is
+fanned out to multiple goroutines. See Record#FromBytes
 
 #### type Record
 
@@ -84,6 +93,18 @@ type Record struct {
 }
 ```
 
+
+#### func (*Record) Bytes
+
+```go
+func (r *Record) Bytes() []byte
+```
+
+#### func (*Record) FromBytes
+
+```go
+func (r *Record) FromBytes(rec []byte) error
+```
 
 #### type Writer
 
