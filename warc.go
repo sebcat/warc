@@ -3,13 +3,7 @@
 //
 // Currently only works on record-at-time compressed .gz files
 //
-// Example:
-//
-//     code
-//     code
-//
-// see also:
-//     URL to implementation repo
+// [Example implementation](https://github.com/sebcat/warc-urls)
 package warc
 
 import (

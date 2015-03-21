@@ -7,14 +7,7 @@ requires go1.4 due to its usage of compress/gzip.Reader#Multistream
 
 Currently only works on record-at-time compressed .gz files
 
-Example:
-
-    code
-    code
-
-see also:
-
-    URL to implementation repo
+[Example implementation](https://github.com/sebcat/warc-urls)
 
 ## Usage
 
