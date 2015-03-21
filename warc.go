@@ -38,6 +38,7 @@ func (bc *byteCounter) Read(p []byte) (n int, err error) {
 	return
 }
 
+// This is a bit of a bottle neck, as it's called often
 func (bc *byteCounter) ReadByte() (c byte, err error) {
 	c, err = bc.r.ReadByte()
 	if err == nil {
