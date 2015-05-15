@@ -1,7 +1,13 @@
-// Sequential WARC file reader library supporting record-at-time compression
-// this requires go1.4 due to its usage of compress/gzip.Reader#Multistream
+// WARC package supporting record-at-time compression.
+// Requires go1.4 due to its usage of compress/gzip.Reader#Multistream
 //
-// Currently only works on record-at-time compressed .gz files
+// Currently only works on record-at-time compressed .gz files.
+//
+// Supports indexed operations for concurrent reading. One use-case
+// is to have one goroutine passing Offset's to a channel that
+// multiple goroutines read from. Each of these goroutines have
+// their own WARC Reader and can read and decompress a record
+// independantly.
 //
 // [Example implementation](https://github.com/sebcat/warc-urls)
 package warc
