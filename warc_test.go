@@ -19,7 +19,7 @@ func TestWriteReadGZIP(t *testing.T) {
 	}
 
 	w := NewWriter(&b)
-	if err := w.WriteRecord(rec); err != nil {
+	if _, err := w.WriteRecord(rec); err != nil {
 		t.Fatal(err)
 	}
 

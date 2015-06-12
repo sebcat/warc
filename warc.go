@@ -15,7 +15,6 @@ package warc
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/binary"
 	"errors"
 	"io"
 	"strconv"
@@ -85,8 +84,6 @@ func (r *reader) ReadByte() (c byte, err error) {
 	r.nbufleft--
 	return
 }
-
-type Offset int64
 
 type Reader struct {
 	r    *reader
@@ -245,7 +242,7 @@ func (r *Reader) Next() (*Record, error) {
 // The original Reader passed to NewReader must implement the
 // io.Seeker interface. The Reader stream will be at the
 // position after the read record on successful return.
-func (r *Reader) NextRawAt(offset Offset) ([]byte, error) {
+func (r *Reader) NextRawAt(offset int64) ([]byte, error) {
 	if seeker, ok := r.r.r.(io.Seeker); ok {
 		if _, err := seeker.Seek(int64(offset), 0); err != nil {
 			return nil, err
@@ -262,7 +259,7 @@ func (r *Reader) NextRawAt(offset Offset) ([]byte, error) {
 // The original Reader passed to NewReader must implement the
 // io.Seeker interface. The Reader stream will be at the
 // position after the read record on successful return.
-func (r *Reader) NextAt(offset Offset) (*Record, error) {
+func (r *Reader) NextAt(offset int64) (*Record, error) {
 	if seeker, ok := r.r.r.(io.Seeker); ok {
 		if _, err := seeker.Seek(int64(offset), 0); err != nil {
 			return nil, err
@@ -275,8 +272,8 @@ func (r *Reader) NextAt(offset Offset) (*Record, error) {
 }
 
 type cwriter struct {
-	c Offset
-	w io.Writer
+	offset int64
+	w      io.Writer
 }
 
 func newCWriter(w io.Writer) *cwriter {
@@ -284,63 +281,48 @@ func newCWriter(w io.Writer) *cwriter {
 }
 
 func (w *cwriter) Write(p []byte) (n int, err error) {
-	before := w.c
+	before := w.offset
 	n, err = w.w.Write(p)
-	w.c += Offset(n)
-	if w.c < before {
+	w.offset += int64(n)
+	if w.offset < before {
 		err = ErrOffsetOverflow
 	}
 
 	return
 }
 
-func (w *cwriter) Offset() Offset {
-	return w.c
+func (w *cwriter) Offset() int64 {
+	return w.offset
 }
 
 type Writer struct {
-	cw    *cwriter
-	zw    *gzip.Writer
-	index io.Writer
-}
-
-func NewIndexingWriter(w io.Writer, index io.Writer) *Writer {
-	cw := newCWriter(w)
-	zw := gzip.NewWriter(cw)
-	return &Writer{cw: cw, zw: zw, index: index}
+	cw *cwriter
+	zw *gzip.Writer
 }
 
 func NewWriter(w io.Writer) *Writer {
-	return NewIndexingWriter(w, nil)
+	cw := newCWriter(w)
+	zw := gzip.NewWriter(cw)
+	return &Writer{cw: cw, zw: zw}
 }
 
 // Write a record. No validation of mandatory WARC fields is performed.
 // The written record will be an independent GZIP stream.
-func (w *Writer) WriteRecord(r *Record) error {
+//
+// Returns the offset of the WARC record relative to the start of
+// the stream passed to NewWriter, or an error on failure.
+func (w *Writer) WriteRecord(r *Record) (int64, error) {
 	rec := r.Bytes()
 	offset := w.cw.Offset()
 	_, err := w.zw.Write(rec)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	if err := w.zw.Close(); err != nil {
-		return err
+		return 0, err
 	}
 
 	w.zw.Reset(w.cw)
-	if w.index != nil {
-		if err := binary.Write(w.index, binary.LittleEndian, &offset); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-// Read an Offset from a WARC index
-func ReadOffset(r io.Reader) (Offset, error) {
-	var offset Offset
-	err := binary.Read(r, binary.LittleEndian, &offset)
-	return offset, err
+	return offset, nil
 }
