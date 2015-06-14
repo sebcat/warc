@@ -175,6 +175,7 @@ func NewReader(r io.Reader) *Reader {
 	}
 }
 
+// Create a new record-at-time warc.gz reader
 func NewGZIPReader(reader io.Reader) (r *Reader, err error) {
 	r = NewReader(reader)
 	r.zr, err = gzip.NewReader(r.r)
@@ -186,6 +187,7 @@ func NewGZIPReader(reader io.Reader) (r *Reader, err error) {
 	return r, nil
 }
 
+// Return the current reader offset
 func (r *Reader) Offset() int64 {
 	return r.r.nread
 }
