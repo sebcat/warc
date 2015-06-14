@@ -186,6 +186,10 @@ func NewGZIPReader(reader io.Reader) (r *Reader, err error) {
 	return r, nil
 }
 
+func (r *Reader) Offset() int64 {
+	return r.r.nread
+}
+
 func (r *Reader) gzipRecord() ([]byte, error) {
 	var rec bytes.Buffer
 	_, err := io.Copy(&rec, r.zr)
