@@ -40,7 +40,7 @@ type Index struct {
 ```go
 func NewIndex(path string) (*Index, error)
 ```
-Create a new ReadWriter backed index
+Create a new file-backed index
 
 #### func (*Index) Close
 

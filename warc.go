@@ -381,7 +381,7 @@ func (index *Index) write(id string, offset int64) error {
 	return nil
 }
 
-// Create a new ReadWriter backed index
+// Create a new file-backed index
 func NewIndex(path string) (*Index, error) {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0755)
 	if err != nil {
