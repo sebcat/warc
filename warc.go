@@ -15,8 +15,10 @@ package warc
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"errors"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -26,6 +28,8 @@ var (
 	ErrNonWARCRecord   = errors.New("non-WARC/1.0 record")
 	ErrOffsetOverflow  = errors.New("offset overflow")
 	ErrNotASeeker      = errors.New("the underlying stream is not seekable")
+	ErrAlreadyExists   = errors.New("Record already exists")
+	ErrNoSuchEntry     = errors.New("No such entry")
 )
 
 // a combo of a buffered reader and an offset counter.
@@ -325,4 +329,101 @@ func (w *Writer) WriteRecord(r *Record) (int64, error) {
 
 	w.zw.Reset(w.cw)
 	return offset, nil
+}
+
+type Index struct {
+	f     *os.File
+	index map[string]int64
+}
+
+func (index *Index) read() (string, int64, error) {
+	var l int32
+	var offset int64
+
+	if err := binary.Read(index.f, binary.BigEndian, &l); err != nil {
+		return "", 0, err
+	} else if l <= 8 {
+		return "", 0, io.ErrUnexpectedEOF
+	}
+
+	if err := binary.Read(index.f, binary.BigEndian, &offset); err != nil {
+		return "", 0, err
+	}
+
+	b := make([]byte, l-8)
+	if _, err := index.f.Read(b); err != nil {
+		return "", 0, err
+	}
+
+	return string(b), offset, nil
+}
+
+func (index *Index) write(id string, offset int64) error {
+	var l int32 = int32(len(id) + 8)
+	if err := binary.Write(index.f, binary.BigEndian, &l); err != nil {
+		return err
+	}
+
+	if err := binary.Write(index.f, binary.BigEndian, &offset); err != nil {
+		return err
+	}
+
+	if _, err := io.WriteString(index.f, id); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// Create a new ReadWriter backed index
+func NewIndex(path string) (*Index, error) {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0755)
+	if err != nil {
+		return nil, err
+	}
+
+	index := &Index{
+		f:     f,
+		index: make(map[string]int64),
+	}
+
+	for {
+		id, offset, err := index.read()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, err
+		}
+
+		index.index[id] = offset
+	}
+
+	return index, nil
+}
+
+// Get an offset from an index by record ID
+func (index *Index) Offset(id string) (int64, error) {
+	if v, ok := index.index[id]; ok {
+		return v, nil
+	} else {
+		return 0, ErrNoSuchEntry
+	}
+}
+
+// Put a new entry in the index
+func (index *Index) Put(id string, offset int64) error {
+	if _, ok := index.index[id]; ok {
+		return ErrAlreadyExists
+	}
+
+	if err := index.write(id, offset); err != nil {
+		return err
+	}
+
+	index.index[id] = offset
+	return nil
+}
+
+func (index *Index) Close() error {
+	return index.f.Close()
 }
