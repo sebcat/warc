@@ -89,6 +89,20 @@ func (r *reader) ReadByte() (c byte, err error) {
 	return
 }
 
+func (r *reader) Seek(offset int64, whence int) (n int64, err error) {
+	if seeker, ok := r.r.(io.Seeker); !ok {
+		return 0, ErrNotASeeker
+	} else {
+		n, err = seeker.Seek(offset, whence)
+		if err != nil {
+			return
+		}
+	}
+	r.nbufleft = 0
+	r.rpos = 0
+	return
+}
+
 type Reader struct {
 	r    *reader
 	zr   *gzip.Reader
@@ -253,12 +267,13 @@ func (r *Reader) Next() (*Record, error) {
 // io.Seeker interface. The Reader stream will be at the
 // position after the read record on successful return.
 func (r *Reader) NextRawAt(offset int64) ([]byte, error) {
-	if seeker, ok := r.r.r.(io.Seeker); ok {
-		if _, err := seeker.Seek(int64(offset), 0); err != nil {
-			return nil, err
-		}
-	} else {
-		return nil, ErrNotASeeker
+	if _, err := r.r.Seek(int64(offset), 0); err != nil {
+		return nil, err
+	}
+
+	if r.zr != nil {
+		r.zr.Reset(r.r)
+		r.zr.Multistream(false)
 	}
 
 	return r.record()
@@ -270,12 +285,13 @@ func (r *Reader) NextRawAt(offset int64) ([]byte, error) {
 // io.Seeker interface. The Reader stream will be at the
 // position after the read record on successful return.
 func (r *Reader) NextAt(offset int64) (*Record, error) {
-	if seeker, ok := r.r.r.(io.Seeker); ok {
-		if _, err := seeker.Seek(int64(offset), 0); err != nil {
-			return nil, err
-		}
-	} else {
-		return nil, ErrNotASeeker
+	if _, err := r.r.Seek(int64(offset), 0); err != nil {
+		return nil, err
+	}
+
+	if r.zr != nil {
+		r.zr.Reset(r.r)
+		r.zr.Multistream(false)
 	}
 
 	return r.Next()

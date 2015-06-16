@@ -148,4 +148,11 @@ func TestIndex(t *testing.T) {
 
 	testRecordEquality(t, n1, TestRecord)
 	testRecordEquality(t, n2, TestRecord2)
+
+	n2, err = r.NextAt(off2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	testRecordEquality(t, n2, TestRecord2)
 }
